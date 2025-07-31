@@ -1,5 +1,5 @@
-# HTB-Writeup-Insecure-Direct-Object-References
-HackTheBox Writeup:  Mass IDOR Enumeration, API exploitation, and privilege escalation.
+# Insecure-Direct-Object-References
+Mass IDOR Enumeration, API exploitation, and privilege escalation.
 
 By Ramyar Daneshgar 
 
